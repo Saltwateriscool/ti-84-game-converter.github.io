@@ -3,7 +3,7 @@ const fileList = document.getElementById("file-list");
 const convertBtn = document.getElementById("convert-btn");
 let files = [];
 
-// Drag & drop UI
+// Drag & drop
 dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("dragover"); });
 dropZone.addEventListener("dragleave", e => { dropZone.classList.remove("dragover"); });
 dropZone.addEventListener("drop", e => {
@@ -22,8 +22,8 @@ function renderFileList() {
   });
 }
 
-// Convert PNG -> C array (16x16 tiles, simple grayscale)
-async function pngToC(file) {
+// Convert PNG -> simple 16-color 8x8 tiles
+async function pngToTilesC(file) {
   return new Promise(resolve => {
     const img = new Image();
     img.onload = () => {
@@ -31,15 +31,14 @@ async function pngToC(file) {
       canvas.width = img.width;
       canvas.height = img.height;
       const ctx = canvas.getContext("2d");
-      ctx.drawImage(img, 0, 0);
+      ctx.drawImage(img,0,0);
       const data = ctx.getImageData(0,0,img.width,img.height).data;
       let cArray = `const uint8_t ${file.name.split('.')[0]}[] = {\n`;
       for(let i=0;i<data.length;i+=4){
-        // Simple grayscale conversion
-        const gray = Math.round(0.3*data[i]+0.59*data[i+1]+0.11*data[i+2]);
+        const gray = Math.round((data[i]+data[i+1]+data[i+2])/48); // 0-15
         cArray += gray + ",";
       }
-      cArray += `\n};\n`;
+      cArray += "\n};\n";
       resolve({name:file.name.split('.')[0]+".c", content:cArray});
     };
     const reader = new FileReader();
@@ -48,31 +47,54 @@ async function pngToC(file) {
   });
 }
 
-// Convert WAV -> C array
+// WAV -> C array
 async function wavToC(file) {
   return new Promise(resolve => {
     const reader = new FileReader();
     reader.onload = e => {
-      const arrayBuffer = e.target.result;
-      const bytes = new Uint8Array(arrayBuffer);
+      const bytes = new Uint8Array(e.target.result);
       let cArray = `const uint8_t ${file.name.split('.')[0]}[] = {\n`;
-      for(let i=0;i<bytes.length;i++){ cArray += bytes[i]+","; }
-      cArray += `\n};\n`;
+      for(let b of bytes) cArray += b + ",";
+      cArray += "\n};\n";
       resolve({name:file.name.split('.')[0]+".c", content:cArray});
     };
     reader.readAsArrayBuffer(file);
   });
 }
 
-// Generate main.c skeleton for simple moveable sprite game
+// Demo assets if no files uploaded
+const demoSpriteC = `const uint8_t player_sprite[] = {
+0,0,0,15,15,0,0,0,
+0,0,15,15,15,15,0,0,
+0,15,15,15,15,15,15,0,
+15,15,15,15,15,15,15,15,
+15,15,15,15,15,15,15,15,
+0,15,15,15,15,15,15,0,
+0,0,15,15,15,15,0,0,
+0,0,0,15,15,0,0,0
+};`;
+
+const demoMapC = `const uint8_t demo_map[] = {
+0,0,0,0,0,0,0,0,0,0,
+0,1,1,1,1,1,1,1,1,0,
+0,1,0,0,0,0,0,0,1,0,
+0,1,0,0,0,0,0,0,1,0,
+0,1,1,1,1,1,1,1,1,0,
+0,0,0,0,0,0,0,0,0,0
+};`;
+
+function generateAssetsH(filesC) {
+  let includes = filesC.map(f=>`#include "${f}"`).join("\n");
+  return `#ifndef ASSETS_H\n#define ASSETS_H\n#include <stdint.h>\n${includes}\n#endif`;
+}
+
 function generateMainC(spriteFiles) {
-  let spriteInclude = spriteFiles.map(f => `#include "${f}"`).join("\n");
+  let spriteInclude = spriteFiles.map(f=>`#include "${f}"`).join("\n");
   return `
 #include <tice.h>
 #include <graphx.h>
 #include <keypadc.h>
 #include <stdint.h>
-
 ${spriteInclude}
 
 int main(void){
@@ -81,14 +103,14 @@ int main(void){
   int x=50,y=50;
   while(!os_GetCSC()){
     kb_Scan();
-    uint8_t c = kb_Data[6]; // simplified key read
-    if(c&0x01) x--; // left
-    if(c&0x02) x++; // right
-    if(c&0x04) y--; // up
-    if(c&0x08) y++; // down
+    uint8_t c = kb_Data[6];
+    if(c&0x01) x--;
+    if(c&0x02) x++;
+    if(c&0x04) y--;
+    if(c&0x08) y++;
     gfx_FillScreen(0);
-    // draw first sprite at x,y
-    // real drawing code depends on your sprite data
+    // draw demo sprite
+    // actual draw code depends on tile handling
     gfx_SwapDraw();
   }
   gfx_End();
@@ -97,26 +119,35 @@ int main(void){
 }
 
 convertBtn.addEventListener("click", async () => {
-  if(files.length===0) return alert("Add files first");
   const zip = new JSZip();
-  let spriteNames = [];
+  let spriteFiles = [], soundFiles = [];
 
-  for(const f of files){
-    if(f.name.endsWith(".png")){
-      const c = await pngToC(f);
-      zip.file(c.name, c.content);
-      spriteNames.push(c.name);
-    } else if(f.name.endsWith(".wav")){
-      const c = await wavToC(f);
-      zip.file(c.name, c.content);
+  if(files.length===0){
+    // use demo assets
+    zip.file("player_sprite.c", demoSpriteC);
+    zip.file("demo_map.c", demoMapC);
+    spriteFiles.push("player_sprite.c");
+    spriteFiles.push("demo_map.c");
+  } else {
+    for(const f of files){
+      if(f.name.endsWith(".png")){
+        const c = await pngToTilesC(f);
+        zip.file(c.name,c.content);
+        spriteFiles.push(c.name);
+      } else if(f.name.endsWith(".wav")){
+        const c = await wavToC(f);
+        zip.file(c.name,c.content);
+        soundFiles.push(c.name);
+      }
     }
   }
 
-  zip.file("main.c", generateMainC(spriteNames));
+  zip.file("assets.h", generateAssetsH(spriteFiles.concat(soundFiles)));
+  zip.file("main.c", generateMainC(spriteFiles));
 
   const blob = await zip.generateAsync({type:"blob"});
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
-  link.download = "ti84_game.8pk";
+  link.download = "ti84_full_game.8pk";
   link.click();
 });
