@@ -1,4 +1,11 @@
-ti84-full-game/
+ti84-upgraded-game/
 ├── index.html
 ├── style.css
-└── script.js
+├── script.js
+├── assets/
+│   ├── player.c
+│   ├── enemies.c
+│   ├── tiles.c
+│   ├── collectibles.c
+│   └── assets.h
+└── main.c
