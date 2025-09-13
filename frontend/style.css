@@ -1,6 +1,0 @@
-body { font-family: Arial, sans-serif; background: #f0f0f0; display:flex; justify-content:center; padding:50px;}
-.container { background:white; padding:20px; border-radius:10px; box-shadow:0 0 10px rgba(0,0,0,0.2); width:400px; text-align:center;}
-.drop-zone { border:2px dashed #888; padding:20px; border-radius:8px; cursor:pointer;}
-.drop-zone.dragover { background:#e0e0ff;}
-button { padding:10px 20px; margin-top:10px; cursor:pointer;}
-ul { text-align:left;}
