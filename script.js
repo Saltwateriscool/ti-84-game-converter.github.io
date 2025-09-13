@@ -22,7 +22,7 @@ function renderFileList() {
   });
 }
 
-// PNG -> simple 16-color 8x8 tiles
+// PNG -> C array (8x8 tiles, 16 colors)
 async function pngToTilesC(file) {
   return new Promise(resolve => {
     const img = new Image();
@@ -62,8 +62,9 @@ async function wavToC(file) {
   });
 }
 
-// Demo sprite & map
-const demoSpriteC = `const uint8_t player_sprite[] = {
+// Demo assets if no files uploaded
+const demoFiles = [
+  {name:"player.c", content:`const uint8_t player_sprite[]={
 0,0,0,15,15,0,0,0,
 0,0,15,15,15,15,0,0,
 0,15,15,15,15,15,15,0,
@@ -71,17 +72,16 @@ const demoSpriteC = `const uint8_t player_sprite[] = {
 15,15,15,15,15,15,15,15,
 0,15,15,15,15,15,15,0,
 0,0,15,15,15,15,0,0,
-0,0,0,15,15,0,0,0
-};`;
-
-const demoMapC = `const uint8_t demo_map[6][10] = {
+0,0,0,15,15,0,0,0};`},
+  {name:"tiles.c", content:`const uint8_t tile_wall[] = {15,15,15,15,15,15,15,15};`},
+  {name:"demo_map.c", content:`const uint8_t demo_map[6][10]={
 {0,0,0,0,0,0,0,0,0,0},
 {0,1,1,1,1,1,1,1,1,0},
 {0,1,0,0,0,0,0,0,1,0},
 {0,1,0,0,0,0,0,0,1,0},
 {0,1,1,1,1,1,1,1,1,0},
-{0,0,0,0,0,0,0,0,0,0}
-};`;
+{0,0,0,0,0,0,0,0,0,0}};`}
+];
 
 // Generate assets.h
 function generateAssetsH(filesC) {
@@ -89,46 +89,46 @@ function generateAssetsH(filesC) {
   return `#ifndef ASSETS_H\n#define ASSETS_H\n#include <stdint.h>\n${includes}\n#endif`;
 }
 
-// Generate playable main.c
-function generateMainC(spriteFiles) {
-  let spriteInclude = spriteFiles.map(f=>`#include "${f}"`).join("\n");
+// Generate main.c with sprites, collectibles, enemies
+function generateMainC(spriteFiles){
+  let includes = spriteFiles.map(f=>`#include "assets/${f}"`).join("\n");
   return `
 #include <tice.h>
 #include <graphx.h>
 #include <keypadc.h>
 #include <stdint.h>
-${spriteInclude}
+${includes}
 
 int main(void){
   gfx_Begin();
   gfx_SetDrawBuffer();
-  int playerX=16, playerY=16;
-  const int tileSize = 16;
+  int tileSize=16;
+  int playerX=16,playerY=16;
+  int coinX=64,coinY=32;
+  int enemyX=100,enemyY=32;
 
   while(!os_GetCSC()){
     kb_Scan();
-    uint8_t c = kb_Data[6];
-
-    // movement with collision check on demo map
+    uint8_t c=kb_Data[6];
     if(c&0x01 && demo_map[playerY/tileSize][(playerX-1)/tileSize]==0) playerX--; // left
     if(c&0x02 && demo_map[playerY/tileSize][(playerX+1)/tileSize]==0) playerX++; // right
     if(c&0x04 && demo_map[(playerY-1)/tileSize][playerX/tileSize]==0) playerY--; // up
     if(c&0x08 && demo_map[(playerY+1)/tileSize][playerX/tileSize]==0) playerY++; // down
 
     gfx_FillScreen(0);
-
-    // draw map (simplified)
-    for(int y=0;y<6;y++){
-      for(int x=0;x<10;x++){
+    // Draw map
+    for(int y=0;y<6;y++)
+      for(int x=0;x<10;x++)
         if(demo_map[y][x]==1) gfx_FillRectangle(x*tileSize,y*tileSize,tileSize,tileSize);
-      }
-    }
+    // Draw collectibles
+    gfx_FillRectangle(coinX,coinY,8,8);
+    // Draw enemy
+    gfx_FillRectangle(enemyX,enemyY,8,8);
+    // Draw player
+    gfx_FillRectangle(playerX,playerY,8,8);
 
-    // draw player
-    gfx_FillRectangle(playerX,playerY,tileSize,tileSize);
     gfx_SwapDraw();
   }
-
   gfx_End();
   return 0;
 }`;
@@ -137,33 +137,33 @@ int main(void){
 // Generate .8pk
 convertBtn.addEventListener("click", async () => {
   const zip = new JSZip();
-  let spriteFiles = [], soundFiles = [];
+  let spriteFiles = [];
 
   if(files.length===0){
-    zip.file("player_sprite.c", demoSpriteC);
-    zip.file("demo_map.c", demoMapC);
-    spriteFiles.push("player_sprite.c");
-    spriteFiles.push("demo_map.c");
+    demoFiles.forEach(f => {
+      zip.file(`assets/${f.name}`, f.content);
+      spriteFiles.push(f.name);
+    });
   } else {
     for(const f of files){
       if(f.name.endsWith(".png")){
         const c = await pngToTilesC(f);
-        zip.file(c.name,c.content);
+        zip.file(`assets/${c.name}`, c.content);
         spriteFiles.push(c.name);
       } else if(f.name.endsWith(".wav")){
         const c = await wavToC(f);
-        zip.file(c.name,c.content);
-        soundFiles.push(c.name);
+        zip.file(`assets/${c.name}`, c.content);
+        spriteFiles.push(c.name);
       }
     }
   }
 
-  zip.file("assets.h", generateAssetsH(spriteFiles.concat(soundFiles)));
+  zip.file("assets/assets.h", generateAssetsH(spriteFiles));
   zip.file("main.c", generateMainC(spriteFiles));
 
   const blob = await zip.generateAsync({type:"blob"});
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
-  link.download = "ti84_playable_game.8pk";
+  link.download = "ti84_upgraded_game.8pk";
   link.click();
 });
