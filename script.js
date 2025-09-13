@@ -22,7 +22,7 @@ function renderFileList() {
   });
 }
 
-// Convert PNG -> simple 16-color 8x8 tiles
+// PNG -> simple 16-color 8x8 tiles
 async function pngToTilesC(file) {
   return new Promise(resolve => {
     const img = new Image();
@@ -62,7 +62,7 @@ async function wavToC(file) {
   });
 }
 
-// Demo assets if no files uploaded
+// Demo sprite & map
 const demoSpriteC = `const uint8_t player_sprite[] = {
 0,0,0,15,15,0,0,0,
 0,0,15,15,15,15,0,0,
@@ -74,20 +74,22 @@ const demoSpriteC = `const uint8_t player_sprite[] = {
 0,0,0,15,15,0,0,0
 };`;
 
-const demoMapC = `const uint8_t demo_map[] = {
-0,0,0,0,0,0,0,0,0,0,
-0,1,1,1,1,1,1,1,1,0,
-0,1,0,0,0,0,0,0,1,0,
-0,1,0,0,0,0,0,0,1,0,
-0,1,1,1,1,1,1,1,1,0,
-0,0,0,0,0,0,0,0,0,0
+const demoMapC = `const uint8_t demo_map[6][10] = {
+{0,0,0,0,0,0,0,0,0,0},
+{0,1,1,1,1,1,1,1,1,0},
+{0,1,0,0,0,0,0,0,1,0},
+{0,1,0,0,0,0,0,0,1,0},
+{0,1,1,1,1,1,1,1,1,0},
+{0,0,0,0,0,0,0,0,0,0}
 };`;
 
+// Generate assets.h
 function generateAssetsH(filesC) {
   let includes = filesC.map(f=>`#include "${f}"`).join("\n");
   return `#ifndef ASSETS_H\n#define ASSETS_H\n#include <stdint.h>\n${includes}\n#endif`;
 }
 
+// Generate playable main.c
 function generateMainC(spriteFiles) {
   let spriteInclude = spriteFiles.map(f=>`#include "${f}"`).join("\n");
   return `
@@ -100,30 +102,44 @@ ${spriteInclude}
 int main(void){
   gfx_Begin();
   gfx_SetDrawBuffer();
-  int x=50,y=50;
+  int playerX=16, playerY=16;
+  const int tileSize = 16;
+
   while(!os_GetCSC()){
     kb_Scan();
     uint8_t c = kb_Data[6];
-    if(c&0x01) x--;
-    if(c&0x02) x++;
-    if(c&0x04) y--;
-    if(c&0x08) y++;
+
+    // movement with collision check on demo map
+    if(c&0x01 && demo_map[playerY/tileSize][(playerX-1)/tileSize]==0) playerX--; // left
+    if(c&0x02 && demo_map[playerY/tileSize][(playerX+1)/tileSize]==0) playerX++; // right
+    if(c&0x04 && demo_map[(playerY-1)/tileSize][playerX/tileSize]==0) playerY--; // up
+    if(c&0x08 && demo_map[(playerY+1)/tileSize][playerX/tileSize]==0) playerY++; // down
+
     gfx_FillScreen(0);
-    // draw demo sprite
-    // actual draw code depends on tile handling
+
+    // draw map (simplified)
+    for(int y=0;y<6;y++){
+      for(int x=0;x<10;x++){
+        if(demo_map[y][x]==1) gfx_FillRectangle(x*tileSize,y*tileSize,tileSize,tileSize);
+      }
+    }
+
+    // draw player
+    gfx_FillRectangle(playerX,playerY,tileSize,tileSize);
     gfx_SwapDraw();
   }
+
   gfx_End();
   return 0;
 }`;
 }
 
+// Generate .8pk
 convertBtn.addEventListener("click", async () => {
   const zip = new JSZip();
   let spriteFiles = [], soundFiles = [];
 
   if(files.length===0){
-    // use demo assets
     zip.file("player_sprite.c", demoSpriteC);
     zip.file("demo_map.c", demoMapC);
     spriteFiles.push("player_sprite.c");
@@ -148,6 +164,6 @@ convertBtn.addEventListener("click", async () => {
   const blob = await zip.generateAsync({type:"blob"});
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
-  link.download = "ti84_full_game.8pk";
+  link.download = "ti84_playable_game.8pk";
   link.click();
 });
